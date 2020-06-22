@@ -10,7 +10,7 @@ class TimeSkill(BaseSkill):
     command_handler = handler
 
 
-all_states = (0, 1, 3, 4, 5, 6, 7, 8)
+all_states = (0, 1, 3, 4, 5, 6, 7, 8, 9)
 
 
 @handler.hello_command
@@ -71,6 +71,29 @@ def hello(req, res, session):
 
 
 """-----------------All_room_commands--(0)-----------------"""
+
+
+@handler.command(words=SETTINGS, states=all_states)
+@save_previous_session_info
+@if_time_flow
+def settings_thing(req, res, session):
+    user = User.get_user(req.user_id)
+    things_list = ThingTime.get_things_list(req.user_id)
+
+    if things_list:
+        thing = ThingTime.search_thing(req.text, things_list)
+        if thing:
+            user.thing_id = thing.id
+            session["state"] = 6
+            res = get_thing_info(res, user, thing)
+        else:
+            res, session = get_menu(req, res, session)
+            res.text, res.tts = choice(menu_not_found_dialog)
+            res.card["header"]['text'] = res.text
+    else:
+        session['state'] = 0
+        res.text, res.tts = choice(timer_list_zero_dialaog)
+        res.buttons = [BUTTONS['add'], BUTTONS['help']]
 
 
 @handler.command(words=EXIT, states=all_states)
@@ -141,24 +164,7 @@ def repeat_all(req, res, session):
 @save_previous_session_info
 @if_time_flow
 def menu_add_thing(req, res, session):
-    session['room'] = 0
-
-    things_list = ThingTime.get_things_list(req.user_id)
-    if len(things_list) >= 15:
-        session['state'] = 3
-        text_, tts_ = choice(create_delete_start_dialog)
-        res.text, res.tts = text_, tts_
-        res.buttons = [BUTTONS['yes'], BUTTONS['no'], BUTTONS['help']]
-
-    else:
-        session['state'] = 2
-        text_, tts_ = choice(create_start_dialog)
-        actions_text, actions_tts = "", ""
-        if User.get_action(req.user_id):
-            actions_text, actions_tts = choice(create_actions_dialog)
-        res.text = " ".join([text_, actions_text])
-        res.tts = " ".join([tts_, actions_tts])
-        res.buttons = [BUTTONS['cancl'], BUTTONS['help']]
+    res, session = get_menu_add_thing(req, res, session)
 
 
 @handler.command(words=THING_LIST, states=all_states)
@@ -172,29 +178,29 @@ def menu_things_list(req, res, session):
 @save_previous_session_info
 @if_time_flow
 def menu_start_time_list(req, res, session):
-    session['room'] = 0
+    res, session = get_menu_start_time_list(req, res, session)
 
+
+@handler.command(words=DELETE, states=all_states)
+@save_previous_session_info
+@if_time_flow
+def delete_thing(req, res, session):
     user = User.get_user(req.user_id)
     things_list = ThingTime.get_things_list(req.user_id)
 
     if session['state'] == 6:
         thing = ThingTime.get_thing(user.thing_id)
-        res, session = go_start_time_flow(res, user, thing, session)
+        res, session = before_delete(res, thing, session)
+
     else:
         if things_list:
             thing = ThingTime.search_thing(req.text, things_list)
             if thing:
-                res, session = go_start_time_flow(res, user, thing, session)
+                res, session = before_delete(res, thing, session)
             else:
-                session['state'] = 1
-                if user.help_actions:
-                    actions_text_, actions_tts_ = choice(timer_list_start_dialog)
-                else:
-                    actions_text_, actions_tts_ = '', ''
-
-                text_ = tts_ = get_str_things_list(things_list)
-                res.text, res.tts = "\n".join([actions_text_, text_]), "".join([actions_tts_, tts_])
-                res.buttons = [BUTTONS['help'], BUTTONS['catalog'], BUTTONS['menu']]
+                res, session = get_menu(req, res, session)
+                res.text, res.tts = choice(menu_not_found_dialog)
+                res.card["header"]['text'] = res.text
         else:
             session['state'] = 0
             res.text, res.tts = choice(timer_list_zero_dialaog)
@@ -204,6 +210,7 @@ def menu_start_time_list(req, res, session):
 @handler.undefined_command(states=0)
 @save_previous_session_info
 @if_time_flow
+@main_menu_click
 def undefined_menu_thing(req, res, session):
     session['room'] = 0
     res, session = get_menu(req, res, session)
@@ -215,6 +222,7 @@ def undefined_menu_thing(req, res, session):
 @handler.undefined_command(states=1)
 @save_previous_session_info
 @if_time_flow
+@main_menu_click
 def undefined_start_time(req, res, session):
     user = User.get_user(req.user_id)
     things_list = ThingTime.get_things_list(req.user_id)
@@ -240,8 +248,10 @@ def cancel_add_thing(req, res, session):
 @handler.undefined_command(states=2)
 @save_previous_session_info
 @if_time_flow
+@main_menu_click
 def undefined_create_thing(req, res, session):
     user = User.get_user(req.user_id)
+
     if any(word in req.tokens for word in HELP):
         item_help = helps_all[str(session["state"])]
         res.text, res.tts = choice(item_help['help'])
@@ -250,8 +260,8 @@ def undefined_create_thing(req, res, session):
         else:
             res.buttons = session["buttons"]
     else:
-        all_check, items_check, not_alice_text = get_all_check(req)
-
+        things_name = get_things_name(req.text)
+        all_check, items_check = get_all_check(req, things_name)
         if any(items_check):
             for item in all_check:
                 if item[0]:
@@ -264,11 +274,7 @@ def undefined_create_thing(req, res, session):
             else:
                 pass
         else:
-            thing = ThingTime.add_new_thing(req.user_id, not_alice_text)
-            user.thing_id = thing.id
-            session['state'] = 9
-            res.text, res.tts = choice(create_created_dialog)
-            res.buttons = [BUTTONS["yes"], BUTTONS["no"], BUTTONS["help"]]
+            res, session = to_create_thing(res, session, things_name)
 
 
 """-----------------Start_created_thing_commands--(9)-----------------"""
@@ -279,6 +285,7 @@ def undefined_create_thing(req, res, session):
 @if_time_flow
 def no_start_created(req, res, session):
     res, session = get_menu(req, res, session)
+
 
 @handler.command(words=YES, states=9)
 @save_previous_session_info
@@ -292,6 +299,7 @@ def yes_start_created(req, res, session):
 @handler.undefined_command(states=9)
 @save_previous_session_info
 @if_time_flow
+@main_menu_click
 def undefined_delete_thing(req, res, session):
     res.text, res.tts = choice(create_start_help_dialog)
     res.buttons = [BUTTONS["yes"], BUTTONS["no"], BUTTONS["help"]]
@@ -322,6 +330,7 @@ def yes_delete_created(req, res, session):
 @handler.undefined_command(states=3)
 @save_previous_session_info
 @if_time_flow
+@main_menu_click
 def undefined_delete_created(req, res, session):
     res.text, res.tts = choice(create_delete_help_dialog)
     res.buttons = [BUTTONS["yes"], BUTTONS["no"], BUTTONS["help"]]
@@ -333,21 +342,12 @@ def undefined_delete_created(req, res, session):
 @handler.undefined_command(states=4)
 @save_previous_session_info
 @if_time_flow
+@main_menu_click
 def undefined_delete_created_list(req, res, session):
     user = User.get_user(req.user_id)
     things_list = ThingTime.get_things_list(req.user_id)
 
-    if any(word in req.text.lower().strip() for word in [x.name.lower() for x in things_list]):
-        session['state'] = 2
-
-        thing = ThingTime.search_thing(req.text, things_list)
-        db.session.delete(thing)
-        text_, tts_ = choice(create_delete_thing_after_dialog)
-        res.text, res.tts = text_.format(thing.name.capitalize()), tts_.format(thing.name.capitalize())
-    else:
-        res.text, res.tts = choice(create_delete_thing_else_dialog)
-
-    res.buttons = [BUTTONS["cancl"], BUTTONS["help"]]
+    res, session = deletes_things(req, res, session, things_list)
 
 
 """-----------------Things_list_commands--(5)-----------------"""
@@ -390,7 +390,8 @@ def back_things_list(req, res, session):
 @handler.undefined_command(states=5)
 @save_previous_session_info
 @if_time_flow
-def undefined_delete_created_list(req, res, session):
+@main_menu_click
+def undefined_things_list(req, res, session):
     user = User.get_user(req.user_id)
     things_list = ThingTime.get_things_list(req.user_id)
     thing = ThingTime.search_thing(req.text, things_list)
@@ -414,18 +415,6 @@ def thing_info(req, res, session):
     thing = ThingTime.get_thing(user.thing_id)
     session["state"] = 6
     res = get_thing_info(res, user, thing)
-
-
-@handler.command(words=DELETE, states=6)
-@save_previous_session_info
-@if_time_flow
-def delete_thing(req, res, session):
-    user = User.get_user(req.user_id)
-    thing = ThingTime.query.filter_by(id=user.thing_id).first()
-    session["state"] = 7
-    text_, tts_ = choice(things_setting_want_del_dialog)
-    res.text, res.tts = text_.format(thing.name.capitalize()), tts_.format(thing.name.capitalize())
-    res.buttons = [BUTTONS["yes"], BUTTONS["no"]]
 
 
 @handler.command(words=CANCEL, states=6)
@@ -493,6 +482,7 @@ def return_last_time(req, res, session):
 @handler.undefined_command(states=6)
 @save_previous_session_info
 @if_time_flow
+@main_menu_click
 def undefined_settings_thing(req, res, session):
     user = User.get_user(req.user_id)
     thing = ThingTime.get_thing(user.thing_id)
@@ -526,14 +516,17 @@ def yes_delete(req, res, session):
     user = User.get_user(req.user_id)
     thing = ThingTime.query.filter_by(id=user.thing_id).first()
     db.session.delete(thing)
-    res, session = get_menu_things_list(req, res, session)
+    res, session = get_menu(req, res, session)
+
     res.text = "Занятие удалено!\n" + res.text
+    res.card["header"]['text'] = "Занятие удалено!"
     res.tts = "Занятие удалено! sil <[200]> " + res.tts
 
 
 @handler.undefined_command(states=7)
 @save_previous_session_info
 @if_time_flow
+@main_menu_click
 def undefined_delete_thing(req, res, session):
     res.text, res.tts = choice(things_del_help_dialog)
     res.buttons = [BUTTONS["yes"], BUTTONS["no"]]
@@ -583,3 +576,42 @@ def update_time_flow(req, res, session):
 def undefined_time_flow(req, res, session):
     res.text, res.tts = choice(time_flow_help_dialog)
     res.buttons = [BUTTONS["update"], BUTTONS["stop"]]
+
+
+"""-----------------To_create_commands--(10)-----------------"""
+
+
+@handler.command(words=NO, states=10)
+@save_previous_session_info
+@if_time_flow
+def no_create(req, res, session):
+    session["state"] = 2
+    text_, tts_ = choice(create_start_dialog)
+    actions_text, actions_tts = "", ""
+    if User.get_action(req.user_id):
+        actions_text, actions_tts = choice(create_actions_dialog)
+    res.text = " ".join([text_, actions_text])
+    res.tts = " ".join([tts_, actions_tts])
+    res.buttons = [BUTTONS['cancl'], BUTTONS['help']]
+
+
+@handler.command(words=YES, states=10)
+@save_previous_session_info
+@if_time_flow
+def yes_create(req, res, session):
+    user = User.get_user(req.user_id)
+    session["state"] = 9
+    thing = ThingTime.add_new_thing(req.user_id, session['create_thing'])
+    user.thing_id = thing.id
+    res.text, res.tts = choice(create_created_dialog)
+    res.buttons = [BUTTONS["yes"], BUTTONS["no"], BUTTONS["help"]]
+
+
+@handler.undefined_command(states=10)
+@save_previous_session_info
+@main_menu_click
+def undefined_created(req, res, session):
+    res.text, res.tts = choice(create_to_create_help_dialog)
+    res.text = res.text.format(session['create_thing'])
+    res.tts = res.tts.format(session['create_thing'])
+    res.buttons = [BUTTONS["yes"], BUTTONS["no"]]

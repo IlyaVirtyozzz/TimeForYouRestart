@@ -1,6 +1,8 @@
 from time import time
 from datetime import datetime
-from flask_app import db
+from flask_app import db, pymorphy2
+
+morph = pymorphy2.MorphAnalyzer()
 
 
 class User(db.Model):
@@ -94,7 +96,7 @@ class ThingTime(db.Model):
 
     @staticmethod
     def add_new_thing(user_id, command):
-        thing = ThingTime(user_id=user_id, name=command, time=0, last_time=0, res_last_time=0,
+        thing = ThingTime(user_id=user_id, name=command.lower().strip(), time=0, last_time=0, res_last_time=0,
                           last_data=datetime.today())
         db.session.add(thing)
         db.session.commit()
@@ -102,10 +104,16 @@ class ThingTime(db.Model):
 
     @staticmethod
     def search_thing(command, things_list):
-        command = command.lower().strip().replace(" ", "")
+        command = command.lower().strip()
+
         for thing in things_list:
-            if thing.name.lower().strip() in command:
+            if thing.name.lower().strip().replace(" ", "") in command.replace(" ", ""):
                 return thing
+        for thing in things_list:
+            if all(word in [morph.parse(x)[0].normal_form for x in command.split()]
+                   for word in [morph.parse(x)[0].normal_form for x in thing.name.lower().strip().split()]):
+                return thing
+
         return False
 
 

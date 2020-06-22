@@ -1,7 +1,8 @@
-import json, logging
+import json, logging,pymorphy2
 from base_skill.skill import Response, Request
 from flask import Flask, request
 from flask_sqlalchemy import SQLAlchemy
+
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sqldatabase.db'
@@ -22,7 +23,6 @@ sessionStorage = {
 def main(skill):
     if skill in skill_dict:
         req = request.json
-        logging.info(req)
         return handle_dialog(req, skill_dict[skill])
     return '404'
 
@@ -45,7 +45,6 @@ def block_ping(req, res):
 
 
 def handle_dialog(req, skill):
-
     res = Response(prepare_res(req))
     req = Request(req)
     session = sessionStorage[skill.name]
