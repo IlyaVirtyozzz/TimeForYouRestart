@@ -1,8 +1,7 @@
-import json, logging,pymorphy2
+import json, logging, pymorphy2
 from base_skill.skill import Response, Request
 from flask import Flask, request
 from flask_sqlalchemy import SQLAlchemy
-
 
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///sqldatabase.db'
